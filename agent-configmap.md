@@ -64,7 +64,7 @@ See [Appendix B](#appendix-b-ray-serve-code-patterns) for more patterns (statefu
 
 ### 2. Create a ConfigMap in ray-service.yaml
 
-Open `dev/ray-service.yaml`. This file has multiple YAML documents separated by `---`. Find the first `---` separator (after the PVC block) and insert a new ConfigMap document before the RayService:
+Open `dev/ray-service.yaml`. This file has multiple YAML documents separated by `---`. Insert a new ConfigMap document between the existing documents (before the RayService block):
 
 ```yaml
 ---
@@ -103,7 +103,7 @@ Rules:
 
 ### 3. Add App to serveConfigV2
 
-Find `serveConfigV2: |` in the file. Under it is `applications:` with existing app entries (currently `fruit_app` at route `/fruit` and `math_app` at route `/calc`). Add your app as a new list item at the same indentation:
+Find `serveConfigV2: |` in the file. Under it is `applications:` with existing app entries. Add your app as a new list item at the same indentation as the existing apps:
 
 ```yaml
       - name: my_service_app
@@ -135,7 +135,7 @@ Find `serveConfigV2: |` in the file. Under it is `applications:` with existing a
 
 Find the HEAD node container by searching for `name: ray-head`. It has a `volumeMounts:` list and the pod has a `volumes:` list. Append to both.
 
-**Add to `volumeMounts:` (under the `ray-head` container, after existing mounts like `log-volume` and `atom-kg-code`):**
+**Add to `volumeMounts:` (under the `ray-head` container, after existing mounts):**
 
 ```yaml
                 - mountPath: /tmp/my-service
@@ -179,7 +179,7 @@ Both HEAD and CPU worker MUST have the same mounts. Ray Serve can schedule repli
 
 ### 6. DO NOT TOUCH the GPU Worker
 
-After the CPU worker group, there's a second worker group: `groupName: gpu-worker-group`. **Stop. Never edit anything in the GPU worker section.** It's managed via Docker images (see `agent-docker.md`).
+After the CPU worker group, there may be additional worker groups (e.g., `groupName: gpu-worker-group`). **Do not edit GPU worker sections.** They are managed via Docker images (see `agent-docker.md`).
 
 ### 7. Push
 
@@ -269,20 +269,10 @@ YAML syntax error (serveConfigV2 is YAML-inside-YAML — indentation must be exa
 The file `dev/ray-service.yaml` in the `draft-deployment` repo has this structure. The `# <-- YOUR EDIT` comments show where you add things:
 
 ```yaml
-# ─── Document 1: PVC (DO NOT TOUCH) ───────────────────────
-apiVersion: v1
-kind: PersistentVolumeClaim
-metadata:
-  name: face-ocr-models
-  namespace: ray
-spec:
-  accessModes: [ReadWriteMany]
-  storageClassName: azurefile
-  resources:
-    requests:
-      storage: 1Gi
+# ─── PVCs and other resources (DO NOT TOUCH existing ones) ──
+# ...existing PVC definitions...
 ---
-# ─── Document 2: YOUR CONFIGMAP (INSERT HERE) ─────────────
+# ─── YOUR CONFIGMAP (INSERT NEW DOCUMENT HERE) ──────────────
 # apiVersion: v1
 # kind: ConfigMap
 # metadata:
@@ -292,7 +282,7 @@ spec:
 #   my_service.py: |
 #     ...your code...
 # ---
-# ─── Document 3: RayService ───────────────────────────────
+# ─── RayService ─────────────────────────────────────────────
 apiVersion: ray.io/v1
 kind: RayService
 metadata:
@@ -304,57 +294,9 @@ spec:
 
   serveConfigV2: |
     applications:
-      - name: fruit_app
-        import_path: fruit.deployment_graph
-        route_prefix: /fruit
-        runtime_env:
-          working_dir: "https://github.com/ray-project/test_dag/archive/78b4a5da38796123d9f9ffff59bab2792a043e95.zip"
-        deployments:
-          - name: MangoStand
-            num_replicas: 2
-            max_replicas_per_node: 1
-            user_config:
-              price: 3
-            ray_actor_options:
-              num_cpus: 0.1
-          - name: OrangeStand
-            num_replicas: 1
-            user_config:
-              price: 2
-            ray_actor_options:
-              num_cpus: 0.1
-          - name: PearStand
-            num_replicas: 1
-            user_config:
-              price: 1
-            ray_actor_options:
-              num_cpus: 0.1
-          - name: FruitMarket
-            num_replicas: 1
-            ray_actor_options:
-              num_cpus: 0.1
-      - name: math_app
-        import_path: conditional_dag.serve_dag
-        route_prefix: /calc
-        runtime_env:
-          working_dir: "https://github.com/ray-project/test_dag/archive/78b4a5da38796123d9f9ffff59bab2792a043e95.zip"
-        deployments:
-          - name: Adder
-            num_replicas: 1
-            user_config:
-              increment: 3
-            ray_actor_options:
-              num_cpus: 0.1
-          - name: Multiplier
-            num_replicas: 1
-            user_config:
-              factor: 5
-            ray_actor_options:
-              num_cpus: 0.1
-          - name: Router
-            num_replicas: 1
+      # ...existing apps...
 
-      # <-- YOUR APP GOES HERE (same indentation as fruit_app/math_app)
+      # <-- YOUR APP GOES HERE (same indentation as existing apps)
 
   rayClusterConfig:
     rayVersion: '2.52.0'
@@ -367,119 +309,54 @@ spec:
         num-cpus: '0'
         ray-client-server-port: '10001'
       template:
-        metadata:
-          labels:
-            app: rayservice-sample
-            component: head
         spec:
-          imagePullSecrets:
-            - name: regcred
-          tolerations:
-            - key: "kubernetes.azure.com/scalesetpriority"
-              operator: "Equal"
-              value: "spot"
-              effect: "NoSchedule"
           containers:
             - name: ray-head
               image: rayproject/ray:2.52.0-py310
-              ports:
-                - containerPort: 8000
-                  name: serve
-                - containerPort: 8265
-                  name: dashboard
-                - containerPort: 6379
-                  name: gcs
-                - containerPort: 10001
-                  name: ray-client
-              resources:
-                limits:
-                  cpu: "2"
-                  memory: "8Gi"
-                requests:
-                  cpu: "1"
-                  memory: "4Gi"
               volumeMounts:
                 - mountPath: /tmp/ray
                   name: log-volume
-                - mountPath: /tmp/atom-kg
-                  name: atom-kg-code
+                # ...existing mounts...
                 # <-- YOUR VOLUME MOUNT HERE
               env:
                 - name: RAY_memory_monitor_refresh_ms
                   value: "0"
-                - name: RAY_GRAFANA_HOST
-                  value: "http://monitoring-prom-stack-grafana.monitoring.svc.cluster.local"
-                - name: RAY_PROMETHEUS_HOST
-                  value: "http://prom-stack-prometheus.monitoring.svc.cluster.local:9090"
-                - name: RAY_GRAFANA_IFRAME_HOST
-                  value: "http://monitoring-prom-stack-grafana.monitoring.svc.cluster.local"
-                - name: RAY_PROMETHEUS_NAME
-                  value: "prom-stack"
+                # ...other env vars...
           volumes:
             - name: log-volume
               emptyDir: {}
-            - name: atom-kg-code
-              configMap:
-                name: atom-kg-ray-tasks
-                items:
-                  - key: atom_tasks.py
-                    path: atom_tasks.py
+            # ...existing volumes...
             # <-- YOUR VOLUME DEFINITION HERE
 
     workerGroupSpecs:
+      # CPU worker group
       - replicas: 1
         minReplicas: 1
         maxReplicas: 3
         groupName: default-worker-group
-        rayStartParams:
-          block: 'true'
         template:
-          metadata:
-            labels:
-              app: rayservice-sample
-              component: cpu-worker
           spec:
-            imagePullSecrets:
-              - name: regcred
-            tolerations:
-              - key: "kubernetes.azure.com/scalesetpriority"
-                operator: "Equal"
-                value: "spot"
-                effect: "NoSchedule"
             containers:
               - name: ray-worker
                 image: rayproject/ray:2.52.0-py310
-                resources:
-                  limits:
-                    cpu: "2"
-                    memory: "4Gi"
-                  requests:
-                    cpu: "1"
-                    memory: "2Gi"
                 volumeMounts:
                   - mountPath: /tmp/ray
                     name: log-volume
-                  - mountPath: /tmp/atom-kg
-                    name: atom-kg-code
+                  # ...existing mounts...
                   # <-- YOUR VOLUME MOUNT HERE (same as HEAD)
             volumes:
               - name: log-volume
                 emptyDir: {}
-              - name: atom-kg-code
-                configMap:
-                  name: atom-kg-ray-tasks
-                  items:
-                    - key: atom_tasks.py
-                      path: atom_tasks.py
+              # ...existing volumes...
               # <-- YOUR VOLUME DEFINITION HERE (same as HEAD)
 
       # ═══════════════════════════════════════════════════════
-      # GPU WORKER GROUP BELOW — DO NOT TOUCH
+      # GPU WORKER GROUP(S) BELOW — DO NOT TOUCH
       # Managed via Docker images (see agent-docker.md)
       # ═══════════════════════════════════════════════════════
-      - replicas: 1
-        groupName: gpu-worker-group
-        # ... (GPU worker config, initContainer, etc.) ...
+      # - replicas: 1
+      #   groupName: gpu-worker-group
+      #   ...
 ```
 
 ---
